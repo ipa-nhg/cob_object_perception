@@ -1,74 +1,176 @@
-cmake_minimum_required(VERSION 2.4.6)
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+cmake_minimum_required(VERSION 2.8.3)
+project(cob_read_text)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(ROS_BUILD_TYPE RelWithDebInfo)
+find_package(catkin REQUIRED COMPONENTS
+  cmake_modules
+  cv_bridge
+  geometry_msgs
+  image_transport
+  pcl_ros
+  roscpp
+  sensor_msgs
+  std_msgs
+)
 
-rosbuild_init()
-
-#set the default path for built executables to the "bin" directory
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-#set the default path for built libraries to the "lib" directory
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
-
-# add include search paths
-INCLUDE_DIRECTORIES(	${PROJECT_SOURCE_DIR}/ros/include
-			${PROJECT_SOURCE_DIR}/common/include)
-
+find_package(Boost REQUIRED COMPONENTS thread filesystem system)
 find_package(Eigen REQUIRED)
-include_directories(${EIGEN_INCLUDE_DIRS})
-add_definitions(${EIGEN_DEFINITIONS})
-
+find_package(OpenCV REQUIRED)
+#find_package(PCL REQUIRED)
 find_package(VTK REQUIRED)
-include_directories(${VTK_INCLUDE_DIRS})
 
-# external pcl
-#find_package(PCL 1.4 REQUIRED)
-include_directories(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS})
-add_definitions(${PCL_DEFINITIONS})
+catkin_package()
 
-#uncomment if you have defined messages
-#rosbuild_genmsg()
-#uncomment if you have defined services
-#rosbuild_gensrv()
 
-#common commands for building c++ executables and libraries
-#rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
-#target_link_libraries(${PROJECT_NAME} another_library)
-#rosbuild_add_boost_directories()
-#rosbuild_link_boost(${PROJECT_NAME} thread)
+###########
+## Build ##
+###########
+include_directories(
+  common/include
+  ros/include
+  ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+#  ${PCL_INCLUDE_DIRS}
+  ${Eigen_INCLUDE_DIRS}
+  ${VTK_INCLUDE_DIRS}
+  ${Boost_INCLUDE_DIRS}
+)
 
-rosbuild_add_boost_directories()
 
-rosbuild_add_library(read_text	common/src/text_detect.cpp)
+## read_text
+add_library(read_text
+  common/src/text_detect.cpp
+)
+add_dependencies(read_text ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
 
-rosbuild_add_executable(run_detect	common/src/run_detection.cpp common/src/text_detect.cpp)
+## read_text_run_detect
+add_executable(read_text_run_detect
+  common/src/run_detection.cpp
+)
+add_dependencies(read_text_run_detect ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_run_detect
+  read_text
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
 
-rosbuild_add_executable(cob_read_text ros/src/cob_read_text.cpp)
-target_link_libraries(cob_read_text read_text)
-rosbuild_link_boost(cob_read_text thread)
+## cob_read_text 
+add_executable(cob_read_text 
+  ros/src/cob_read_text.cpp
+)
+add_dependencies(cob_read_text ${catkin_EXPORTED_TARGETS})
+target_link_libraries(cob_read_text 
+  read_text
+  ${catkin_LIBRARIES}
+)
 
-rosbuild_add_executable(read_evaluation ros/src/read_evaluation.cpp)
+## read_text_read_evaluation 
+add_executable(read_text_read_evaluation 
+  ros/src/read_evaluation.cpp
+)
+add_dependencies(read_text_read_evaluation ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_read_evaluation 
+  read_text
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
 
-rosbuild_add_executable(labelBox ros/src/labelBox.cpp)
-rosbuild_link_boost(labelBox filesystem system)
+## read_text_letter_evaluation
+#add_executable(read_text_letter_evaluation
+#  ros/src/letter_evaluation.cpp
+#)
+#add_dependencies(read_text_letter_evaluation  ${catkin_EXPORTED_TARGETS})
+#target_link_libraries(read_text_letter_evaluation
+#  ${catkin_LIBRARIES}
+#)
 
-rosbuild_add_executable(create_correlation common/src/createCorrelation.cpp)
-rosbuild_link_boost(create_correlation filesystem system)
+## read_text_labelBox 
+add_executable(read_text_labelBox 
+  ros/src/labelBox.cpp
+)
+add_dependencies(read_text_labelBox  ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_labelBox
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
 
-rosbuild_add_executable(record_kinect_prosilica ros/src/recordKinPro.cpp)
-rosbuild_link_boost(record_kinect_prosilica filesystem system thread)
+## read_text_create_correlation
+add_executable(read_text_create_correlation 
+  common/src/createCorrelation.cpp
+)
+add_dependencies(read_text_create_correlation  ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_create_correlation 
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
 
-rosbuild_add_executable(script_for_imglist common/src/convertXML.cpp)
+## read_text_record_kinect_prosilica
+add_executable(read_text_record_kinect_prosilica
+  ros/src/recordKinPro.cpp
+)
+add_dependencies(read_text_record_kinect_prosilica  ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_record_kinect_prosilica
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
 
-rosbuild_add_executable(showPCD common/src/showPCD.cpp)
-target_link_libraries(showPCD ${PCL_LIBRARIES} vtkCommon vtkFiltering)
-rosbuild_link_boost(showPCD thread)
+## read_text_script_for_imglist 
+add_executable(read_text_script_for_imglist 
+  common/src/convertXML.cpp
+)
+add_dependencies(read_text_script_for_imglist  ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_script_for_imglist 
+  ${catkin_LIBRARIES}
+)
 
-rosbuild_add_roslaunch_check(launch)
+## read_text_showPCD
+## cmake --help-policy CMP0003
+if(COMMAND cmake_policy)
+  cmake_policy(SET CMP0003 NEW)
+endif() #(COMMAND cmake_policy)
+add_executable(read_text_showPCD 
+  common/src/showPCD.cpp
+)
+add_dependencies(read_text_showPCD ${catkin_EXPORTED_TARGETS})
+target_link_libraries(read_text_showPCD 
+  ${catkin_LIBRARIES}
+  ${VTK_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
+
+#############
+## Install ##
+#############
+install(TARGETS 
+    read_text
+    read_text_run_detect
+    cob_read_text
+    read_text_read_evaluation
+#    read_text_letter_evaluation
+    read_text_labelBox
+    read_text_create_correlation
+    read_text_record_kinect_prosilica
+    read_text_script_for_imglist
+    read_text_showPCD 
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(PROGRAMS scripts/dictionary.py scripts/filelist.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY 
+    common/include/${PROJECT_NAME}/
+    ros/include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+)
+
+install(DIRECTORY launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)

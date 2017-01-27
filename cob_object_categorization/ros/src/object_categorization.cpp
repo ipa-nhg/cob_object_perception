@@ -1,18 +1,74 @@
 #include <object_categorization/object_categorization.h>
 #include <boost/filesystem.hpp>
 #include <fstream>
-
-ObjectCategorization::ObjectCategorization()
-{
-}
+#include <pcl/conversions.h>
+#include <pcl_conversions/pcl_conversions.h>
+//ObjectCategorization::ObjectCategorization()
+//{
+//}
 
 ObjectCategorization::ObjectCategorization(ros::NodeHandle nh)
 : node_handle_(nh),
-  object_classifier_(ros::package::getPath("cob_object_categorization") + "/common/files/classifier/EMClusterer5.txt", ros::package::getPath("cob_object_categorization") + "/common/files/classifier/")
+  object_classifier_(ros::package::getPath("cob_object_categorization") + "/common/files/classifier/EMClusterer5.txt", ros::package::getPath("cob_object_categorization") + "/common/files/classifier/"),
+  detect_objects_action_server_(nh, "categorize_object", boost::bind(&ObjectCategorization::detectObjectsCallback, this, _1), false)	// this initializes the action server; important: always set the last parameter to false
 {
+	// Parameters
+	global_feature_params_.minNumber3DPixels = 50;
+	global_feature_params_.numberLinesX.push_back(7);
+//	global_feature_params_.numberLinesX.push_back(2);
+	global_feature_params_.numberLinesY.push_back(7);
+//	global_feature_params_.numberLinesY.push_back(2);
+	global_feature_params_.polynomOrder.push_back(2);
+//	global_feature_params_.polynomOrder.push_back(2);
+	global_feature_params_.pointDataExcess = 0;	//int(3.01*(globalFeatureParams.polynomOrder+1));	// excess decreases the accuracy
+	global_feature_params_.cellCount[0] = 5;
+	global_feature_params_.cellCount[1] = 5;
+	global_feature_params_.cellSize[0] = 0.5;
+	global_feature_params_.cellSize[1] = 0.5;
+	global_feature_params_.vocabularySize = 5;
+	//global_feature_params_.additionalArtificialTiltedViewAngle.push_back(0.);
+	//global_feature_params_.additionalArtificialTiltedViewAngle.push_back(45.);
+	global_feature_params_.thinningFactor = 1.0;
+	global_feature_params_.useFeature["bow"] = false;
+	global_feature_params_.useFeature["sap"] = true;
+	global_feature_params_.useFeature["sap2"] = false;
+	global_feature_params_.useFeature["pointdistribution"] = false;
+	global_feature_params_.useFeature["normalstatistics"] = false;
+	global_feature_params_.useFeature["vfh"] = false;
+	global_feature_params_.useFeature["grsd"] = false;
+	global_feature_params_.useFeature["gfpfh"] = false;
+	global_feature_params_.useFullPCAPoseNormalization = false;
+	global_feature_params_.useRollPoseNormalization = false;
+
 	projection_matrix_ = (cv::Mat_<double>(3, 4) << 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 	pointcloud_width_ = 640;
 	pointcloud_height_ = 480;
+
+	node_handle_.param("/object_categorization/object_categorization/mode_of_operation", mode_of_operation_, 1);
+	std::cout<< "mode_of_operation: " << mode_of_operation_ << "\n";
+	std::string object_name = "";
+	node_handle_.param<std::string>("/object_categorization/object_categorization/object_name", object_name, "");
+	std::cout<< "object_name: " << object_name << "\n";
+	bool start_categorization_on_startup = true;
+	node_handle_.param("/object_categorization/object_categorization/start_categorization_on_startup", start_categorization_on_startup, true);
+	std::cout<< "start_categorization_on_startup: " << start_categorization_on_startup << "\n";
+
+	hermes_object_name_ = object_name;
+
+	// initialize special modes
+	if (mode_of_operation_ == 2)
+	{
+		object_classifier_.HermesLoadCameraCalibration(object_name, projection_matrix_);
+		object_classifier_.HermesDetectInit((ClusterMode)CLUSTER_EM, (ClassifierType)CLASSIFIER_RTC, global_feature_params_, object_name);
+	}
+	else if (mode_of_operation_ == 3)
+	{
+		// Hermes train object
+		object_classifier_.HermesLoadCameraCalibration(object_name, projection_matrix_);
+		object_classifier_.HermesBuildDetectionModelFromRecordedData(object_name, projection_matrix_, (ClusterMode)CLUSTER_EM, (ClassifierType)CLASSIFIER_RTC, global_feature_params_);
+		std::cout << "training done.";
+		return;
+	}
 
 	// subscribers
 	it_ = new image_transport::ImageTransport(node_handle_);
@@ -24,12 +80,14 @@ ObjectCategorization::ObjectCategorization(ros::NodeHandle nh)
 	// input synchronization
 	sync_input_ = new message_filters::Synchronizer< message_filters::sync_policies::ApproximateTime<cob_perception_msgs::PointCloud2Array, sensor_msgs::Image> >(60);
 	sync_input_->connectInput(input_pointcloud_sub_, color_image_sub_);
-	sync_input_->registerCallback(boost::bind(&ObjectCategorization::inputCallback, this, _1, _2));
+	if (start_categorization_on_startup == true)
+		sync_input_->registerCallback(boost::bind(&ObjectCategorization::inputCallback, this, _1, _2));
+
+	detect_objects_action_server_.start();
 }
 
 ObjectCategorization::~ObjectCategorization()
 {
-
 	if (it_ != 0) delete it_;
 	if (sync_input_ != 0) delete sync_input_;
 }
@@ -42,15 +100,21 @@ void ObjectCategorization::inputCallback(const cob_perception_msgs::PointCloud2A
 	// convert color image to cv::Mat
 	cv_bridge::CvImageConstPtr color_image_ptr;
 	cv::Mat display_color;
-	cv::Mat display_segmentation = cv::Mat::zeros(pointcloud_height_, pointcloud_width_, CV_8UC3);
+	cv::Mat display_segmentation(pointcloud_height_, pointcloud_width_, CV_8UC3);
+	display_segmentation.setTo(cv::Scalar(255,255,255,255));
 	if (convertColorImageMessageToMat(input_image_msg, color_image_ptr, display_color) == false)
 		return;
 
 	for (int segmentIndex=0; segmentIndex<(int)input_pointcloud_segments_msg->segments.size(); segmentIndex++)
 	{
 		typedef pcl::PointXYZRGB PointType;
-		pcl::PointCloud<PointType> input_pointcloud;
-		pcl::fromROSMsg(input_pointcloud_segments_msg->segments[segmentIndex], input_pointcloud);
+		pcl::PointCloud<PointType>::Ptr input_pointcloud(new pcl::PointCloud<PointType>);
+
+		pcl::PCLPointCloud2 pcl_pc;
+		pcl_conversions::toPCL(input_pointcloud_segments_msg->segments[segmentIndex], pcl_pc);
+		pcl::fromPCLPointCloud2(pcl_pc, *input_pointcloud);
+
+		//pcl::fromROSMsg(input_pointcloud_segments_msg->segments[segmentIndex], *input_pointcloud);
 
 		// convert to shared image
 		int umin=1e8, vmin=1e8;
@@ -58,67 +122,120 @@ void ObjectCategorization::inputCallback(const cob_perception_msgs::PointCloud2A
 		cvSetZero(color_image);
 		IplImage* coordinate_image = cvCreateImage(cvSize(pointcloud_width_, pointcloud_height_), IPL_DEPTH_32F, 3);
 		cvSetZero(coordinate_image);
-		for (unsigned int i=0; i<input_pointcloud.size(); i++)
+		pcl::PointXYZ avgPoint(0., 0., 0.), minPoint(1e10, 1e10, 1e10), maxPoint(-1e10,-1e10,-1e10);
+		unsigned int number_valid_points = 0;
+		for (unsigned int i=0; i<input_pointcloud->size(); i++)
 		{
-			cv::Mat X = (cv::Mat_<double>(4, 1) << input_pointcloud[i].x, input_pointcloud[i].y, input_pointcloud[i].z, 1.0);
+			if ((*input_pointcloud)[i].x==0 && (*input_pointcloud)[i].y==0 && (*input_pointcloud)[i].z==0)
+				continue;
+			++number_valid_points;
+			avgPoint.x += (*input_pointcloud)[i].x;
+			avgPoint.y += (*input_pointcloud)[i].y;
+			avgPoint.z += (*input_pointcloud)[i].z;
+			minPoint.x = std::min(minPoint.x, (*input_pointcloud)[i].x);
+			minPoint.y = std::min(minPoint.y, (*input_pointcloud)[i].y);
+			minPoint.z = std::min(minPoint.z, (*input_pointcloud)[i].z);
+			maxPoint.x = std::max(maxPoint.x, (*input_pointcloud)[i].x);
+			maxPoint.y = std::max(maxPoint.y, (*input_pointcloud)[i].y);
+			maxPoint.z = std::max(maxPoint.z, (*input_pointcloud)[i].z);
+
+			cv::Mat X = (cv::Mat_<double>(4, 1) << (*input_pointcloud)[i].x, (*input_pointcloud)[i].y, (*input_pointcloud)[i].z, 1.0);
 			cv::Mat x = projection_matrix_ * X;
 			int v = x.at<double>(1)/x.at<double>(2), u = x.at<double>(0)/x.at<double>(2);
-			cvSet2D(color_image, v, u, CV_RGB(input_pointcloud[i].r, input_pointcloud[i].g, input_pointcloud[i].b));
-			cvSet2D(coordinate_image, v, u, cvScalar(input_pointcloud[i].x, input_pointcloud[i].y, input_pointcloud[i].z));
-			display_segmentation.at< cv::Point3_<uchar> >(v,u) = cv::Point3_<uchar>(input_pointcloud[i].b, input_pointcloud[i].g, input_pointcloud[i].r);
+			cvSet2D(color_image, v, u, CV_RGB((*input_pointcloud)[i].r, (*input_pointcloud)[i].g, (*input_pointcloud)[i].b));
+			cvSet2D(coordinate_image, v, u, cvScalar((*input_pointcloud)[i].x, (*input_pointcloud)[i].y, (*input_pointcloud)[i].z));
+			display_segmentation.at< cv::Point3_<uchar> >(v,u) = cv::Point3_<uchar>((*input_pointcloud)[i].b, (*input_pointcloud)[i].g, (*input_pointcloud)[i].r);
 
 			if (u<umin) umin=u;
 			if (v<vmin) vmin=v;
 		}
-
-		// Parameters
-		ObjectClassifier::GlobalFeatureParams globalFeatureParams;
-		globalFeatureParams.minNumber3DPixels = 50;
-		globalFeatureParams.numberLinesX.push_back(7);
-	//	globalFeatureParams.numberLinesX.push_back(2);
-		globalFeatureParams.numberLinesY.push_back(7);
-	//	globalFeatureParams.numberLinesY.push_back(2);
-		globalFeatureParams.polynomOrder.push_back(2);
-	//	globalFeatureParams.polynomOrder.push_back(2);
-		globalFeatureParams.pointDataExcess = 0;	//int(3.01*(globalFeatureParams.polynomOrder+1));	// excess decreases the accuracy
-		globalFeatureParams.cellCount[0] = 5;
-		globalFeatureParams.cellCount[1] = 5;
-		globalFeatureParams.cellSize[0] = 0.5;
-		globalFeatureParams.cellSize[1] = 0.5;
-		globalFeatureParams.vocabularySize = 5;
-		//globalFeatureParams.additionalArtificialTiltedViewAngle.push_back(0.);
-		//globalFeatureParams.additionalArtificialTiltedViewAngle.push_back(45.);
-		double factorSamplesTrainData = 1.;		// for each object, this ratio of samples should go to the training set, the rest is for testing
-		globalFeatureParams.useFeature["bow"] = false;
-		globalFeatureParams.useFeature["sap"] = true;
-		globalFeatureParams.useFeature["sap2"] = false;
-		globalFeatureParams.useFeature["pointdistribution"] = false;
-		globalFeatureParams.useFeature["normalstatistics"] = false;
-		globalFeatureParams.useFeature["vfh"] = false;
-		globalFeatureParams.useFeature["grsd"] = false;
-		globalFeatureParams.useFeature["gfpfh"] = false;
-		globalFeatureParams.useFullPCAPoseNormalization = false;
-		globalFeatureParams.useRollPoseNormalization = true;
+		avgPoint.x /= (double)number_valid_points;
+		avgPoint.y /= (double)number_valid_points;
+		avgPoint.z /= (double)number_valid_points;
 
 		SharedImage si;
 		si.setCoord(coordinate_image);
 		si.setShared(color_image);
-		std::map<double, std::string> resultsOrdered;
-		std::map<std::string, double> results;
-		object_classifier_.CategorizeObject(&si, results, resultsOrdered, (ClusterMode)CLUSTER_EM, (ClassifierType)CLASSIFIER_RTC, globalFeatureParams);
+		if (mode_of_operation_ == 1)
+		{
+			// normal mode of operation
+			std::map<double, std::string> resultsOrdered;
+			std::map<std::string, double> results;
+			object_classifier_.CategorizeObject(&si, results, resultsOrdered, (ClusterMode)CLUSTER_EM, (ClassifierType)CLASSIFIER_RTC, global_feature_params_);
+			std::map<double, std::string>::iterator it = resultsOrdered.end();
+			it--;
+			std::stringstream label;
+			label << it->second;
+			label << " (" << setprecision(3) << 100*it->first << "%)";
+			cv::putText(display_color, label.str().c_str(), cvPoint(umin, max(0,vmin-20)), cv::FONT_HERSHEY_SIMPLEX, 1.0, CV_RGB(0, 255, 0));
+			cv::putText(display_segmentation, label.str().c_str(), cvPoint(umin, max(0,vmin-20)), cv::FONT_HERSHEY_SIMPLEX, 1.0, CV_RGB(0, 255, 0));
+		}
+		else if (mode_of_operation_ == 2)
+		{
+			// Hermes mode
+			if (maxPoint.x-minPoint.x < 0.5 && maxPoint.y-minPoint.y < 0.5 && maxPoint.z-minPoint.z < 0.5)
+			{
+				double pan=0, tilt=0, roll=0;
+				Eigen::Matrix4f finalTransform;
+				double matchingScore = 1e10;
+				object_classifier_.HermesCategorizeObject(input_pointcloud, avgPoint, &si, (ClusterMode)CLUSTER_EM, (ClassifierType)CLASSIFIER_RTC, global_feature_params_, pan, tilt, roll, finalTransform, matchingScore);
+
+				if (matchingScore < 0.001)//0.0003)
+				{
+					// draw shoe coordinate system into display_color
+					tf::Transform object_pose;
+					{
+						std::cout << "avgPoint: " << avgPoint.x << ", " << avgPoint.y << ", " << avgPoint.z << "\n";
+						tf::Transform pose1, pose2, pose3, pose4;
+						tf::Quaternion q_temp;
+						pose1.setOrigin(tf::Vector3(avgPoint.x, avgPoint.y, avgPoint.z));			// recording distance
+						q_temp.setEuler(0., 90./180.*CV_PI, -90./180.*CV_PI); pose1.setRotation(q_temp);		// rotation from camera system to object coordinate system
+						pose2.setOrigin(tf::Vector3(0.,0.,0.));
+						q_temp.setEuler(tilt, 0., 0.); pose2.setRotation(q_temp);		// orientation in tilt direction
+						pose3.setOrigin(tf::Vector3(0.,0.,0.));
+						q_temp.setEuler(0., 0., -pan); pose3.setRotation(q_temp);			// orientation in pan direction
+						tf::Transform finalTransformTf(tf::Matrix3x3(finalTransform(0,0),finalTransform(0,1),finalTransform(0,2),finalTransform(1,0),finalTransform(1,1),finalTransform(1,2),finalTransform(2,0),finalTransform(2,1),finalTransform(2,2)), tf::Vector3(finalTransform(0,3),finalTransform(1,3),finalTransform(2,3)));
+						pose4.setOrigin(tf::Vector3(-avgPoint.x, -avgPoint.y, -avgPoint.z));
+						q_temp.setEuler(0.,0.,0.); pose4.setRotation(q_temp);
+						object_pose = pose4.inverse() * finalTransformTf.inverse() * pose4 * pose1 * pose2 * pose3;	// transformation pointing from camera system to object system
+					}
+//					drawObjectCoordinateSystem(object_pose, display_color);
+					latest_object_detection_.label = hermes_object_name_;
+					tf::Stamped<tf::Transform> object_pose_stamped = tf::Stamped<tf::Transform>(object_pose, input_pointcloud_segments_msg->header.stamp, input_pointcloud_segments_msg->header.frame_id);
+					tf::poseStampedTFToMsg(object_pose_stamped, latest_object_detection_.pose);
+					latest_object_detection_.header.frame_id = input_pointcloud_segments_msg->header.frame_id;
+					latest_object_detection_.header.stamp = input_pointcloud_segments_msg->header.stamp;
+					transform_broadcaster_.sendTransform(tf::StampedTransform(object_pose, input_pointcloud_segments_msg->header.stamp, input_pointcloud_segments_msg->header.frame_id, "detected_shoe"));
+				}
+			}
+		}
 		si.Release();
 
-		std::map<double, std::string>::iterator it = resultsOrdered.end();
-		it--;
-		std::stringstream label;
-		label << it->second;
-		label << " (" << setprecision(3) << 100*it->first << "%)";
-		cv::putText(display_color, label.str().c_str(), cvPoint(umin, max(0,vmin-20)), cv::FONT_HERSHEY_SIMPLEX, 1.0, CV_RGB(0, 255, 0));
-		cv::putText(display_segmentation, label.str().c_str(), cvPoint(umin, max(0,vmin-20)), cv::FONT_HERSHEY_SIMPLEX, 1.0, CV_RGB(0, 255, 0));
 	}
-	cv::imshow("categorized objects", display_color);
-	cv::imshow("segmented image", display_segmentation);
-	cv::waitKey(10);
+//	cv::imshow("categorized objects", display_color);
+//	cv::imshow("segmented image", display_segmentation);
+//	cv::waitKey(80);
+}
+
+void ObjectCategorization::drawObjectCoordinateSystem(const tf::Transform& object_pose, cv::Mat& display_image)
+{
+	cv::Point o_C = projectVector3ToUV(object_pose*tf::Vector3(0.,0.,0.));
+	cv::Point x_C = projectVector3ToUV(object_pose*tf::Vector3(0.1,0.,0.));
+	cv::Point y_C = projectVector3ToUV(object_pose*tf::Vector3(0.,0.1,0.));
+	cv::Point z_C = projectVector3ToUV(object_pose*tf::Vector3(0.,0.,0.1));
+
+	cv::line(display_image, o_C, x_C, CV_RGB(255,0,0), 2);
+	cv::line(display_image, o_C, y_C, CV_RGB(0,255,0), 2);
+	cv::line(display_image, o_C, z_C, CV_RGB(0,0,255), 2);
+}
+
+cv::Point ObjectCategorization::projectVector3ToUV(tf::Vector3 point_C)
+{
+	cv::Mat X = (cv::Mat_<double>(4, 1) << point_C.getX(), point_C.getY(), point_C.getZ(), 1.0);
+//	std::cout << X.at<double>(0) << ", " << X.at<double>(1) << ", " << X.at<double>(2) << ", " << X.at<double>(3);
+	cv::Mat x = projection_matrix_ * X;
+//	std::cout << "    u,v,w: " << x.at<double>(0,0) << ", " << x.at<double>(1,0) << ", " << x.at<double>(2,0) << "    u,v: " << x.at<double>(0,0)/x.at<double>(2,0) << ", " << x.at<double>(1,0)/x.at<double>(2,0);
+	return cv::Point(x.at<double>(0,0)/x.at<double>(2,0), x.at<double>(1,0)/x.at<double>(2,0));
 }
 
 /// Converts a color image message to cv::Mat format.
@@ -138,6 +255,47 @@ unsigned long ObjectCategorization::convertColorImageMessageToMat(const sensor_m
 	return true;
 }
 
+void ObjectCategorization::detectObjectsCallback(const cob_object_detection_msgs::DetectObjectsGoalConstPtr& goal)
+{
+	// this callback function is executed each time a request (= goal message) comes in for this service server
+	std::string object_name = goal->object_name.data;
+	hermes_object_name_ = object_name;
+	ROS_INFO("Detect Object Action Server: Received a request for detecting object %s.", object_name.c_str());
+
+	// init the algorithm for the requested object
+	object_classifier_.HermesLoadCameraCalibration(object_name, projection_matrix_);
+	object_classifier_.HermesDetectInit((ClusterMode)CLUSTER_EM, (ClassifierType)CLASSIFIER_RTC, global_feature_params_, object_name);
+
+	// activate detection
+	message_filters::Connection connection = sync_input_->registerCallback(boost::bind(&ObjectCategorization::inputCallback, this, _1, _2));
+
+	// wait for detection
+	ros::Time start_time = ros::Time::now();
+	ros::Rate loop_rate(0.1);
+	bool abort_with_timeout = false;
+	while ((ros::Time::now() - latest_object_detection_.header.stamp).toSec() > 2.0 && abort_with_timeout==false)
+	{
+		if ((ros::Time::now() - start_time).toSec() > 30.0)
+			abort_with_timeout = true;
+		loop_rate.sleep();
+	}
+
+	// deactivate detection
+	connection.disconnect();
+
+	cob_object_detection_msgs::DetectObjectsResult res;
+	if (abort_with_timeout == false)
+	{
+		res.object_list.detections.push_back(latest_object_detection_);
+		res.object_list.header = latest_object_detection_.header;
+	}
+	else
+		ROS_WARN("Did not find any object of type %s in the allowed time span.", object_name.c_str());
+
+	// this sends the response back to the caller
+	detect_objects_action_server_.setSucceeded(res);
+}
+
 void ObjectCategorization::calibrationCallback(const sensor_msgs::CameraInfo::ConstPtr& calibration_msg)
 {
 	pointcloud_height_ = calibration_msg->height;
@@ -151,6 +309,8 @@ void ObjectCategorization::calibrationCallback(const sensor_msgs::CameraInfo::Co
 //				std::cout << temp.at<double>(v,u) << " ";
 //		std::cout << "]" << std::endl;
 	projection_matrix_ = temp;
+
+	input_pointcloud_camera_info_sub_.shutdown();
 }
 
 namespace fs = boost::filesystem;

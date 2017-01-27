@@ -1,7 +1,6 @@
 #ifndef __IPA_FIDUCIAL_MODEL_PI_H__
 #define __IPA_FIDUCIAL_MODEL_PI_H__
 
-//#include "../../../../../cob_object_perception_intern/windows/src/PreCompiledHeaders/StdAfx.h"
 #ifdef __LINUX__
 	#include "cob_vision_utils/VisionUtils.h"
 	#include "cob_fiducials/FiducialDefines.h"
@@ -84,6 +83,7 @@ private:
 
 	std::vector<t_pi> m_ref_tag_vec; ///< reference tags to be recognized
 	cv::Mat m_debug_img; ///< image that holds debugging output
+	bool m_use_fast_pi_tag;
 };
 
 } // end namespace ipa_Fiducials

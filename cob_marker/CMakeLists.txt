@@ -1,36 +1,80 @@
-cmake_minimum_required(VERSION 2.4.6)
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+cmake_minimum_required(VERSION 2.8.3)
+project(cob_marker)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(ROS_BUILD_TYPE RelWithDebInfo)
+# To find FindDMTX.cmake for its later use in find_package
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+#message(STATUS "${CMAKE_MODULE_PATH}")
 
-rosbuild_init()
-
-INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/common/include ${PROJECT_SOURCE_DIR}/ros/include /usr/include/ImageMagick)
-LINK_DIRECTORIES(${PROJECT_SOURCE_DIR}/libs )
-
-#set the default path for built executables to the "bin" directory
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-#set the default path for built libraries to the "lib" directory
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
-
-#uncomment if you have defined messages
-#rosbuild_genmsg()
-#uncomment if you have defined services
-#rosbuild_gensrv()
-
-rosbuild_add_executable(cob_marker
-	ros/src/marker_action_new.cpp
-	common/src/MagickBitmapSource.cpp
+find_package(catkin REQUIRED COMPONENTS
+  actionlib
+  cmake_modules
+  cob_object_detection_msgs
+  cv_bridge
+  image_transport
+  libzxing
+  message_filters
+  nodelet
+  pcl_ros
+  roscpp
+  tf
+  tf_conversions
+  visualization_msgs
 )
 
-target_link_libraries(cob_marker dmtx)
-rosbuild_link_boost(cob_marker signals)
+find_package(Boost REQUIRED COMPONENTS signals)
+find_package(DMTX REQUIRED)
+find_package(ImageMagick COMPONENTS Magick++ REQUIRED)
+find_package(OpenCV REQUIRED)
+#find_package(PCL REQUIRED)
 
-# rostest
-rosbuild_add_roslaunch_check(ros/launch)
+catkin_package()
+
+###########
+## Build ##
+###########
+include_directories(
+  common/include
+  ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+  ${Boost_INCLUDE_DIRS}
+  ${DMTX_INCLUDE_DIRS}
+  ${ImageMagick_INCLUDE_DIRS}
+#  ${PCL_INCLUDE_DIRS}
+)
+
+## Declare a cpp executable
+add_executable(marker
+  ros/src/marker_action.cpp
+  common/src/MagickBitmapSource.cpp
+)
+add_dependencies(marker ${catkin_EXPORTED_TARGETS})
+target_link_libraries(marker
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${ImageMagick_LIBRARIES}
+  ${DMTX_LIBRARIES}
+#  ${PCL_LIBRARIES}
+)
+
+#############
+## Install ##
+#############
+install(TARGETS marker
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(PROGRAMS ros/src/marker_action_client.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY common/include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+)
+
+install(DIRECTORY ros/launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/ros
+)

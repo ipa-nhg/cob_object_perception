@@ -1,91 +1,109 @@
-cmake_minimum_required(VERSION 2.6)
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+cmake_minimum_required(VERSION 2.8.3)
+project(cob_object_categorization)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(ROS_BUILD_TYPE RelWithDebInfo)
 
-rosbuild_init()
-
-#set the default path for built executables to the "bin" directory
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-#set the default path for built libraries to the "lib" directory
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
-
-#uncomment if you have defined messages
-#rosbuild_genmsg()
-#uncomment if you have defined services
-#rosbuild_gensrv()
-
-# add include search paths
-INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/ros/include
-		    ${PROJECT_SOURCE_DIR}/common/include)
-		    #/usr/include/pcl-1.4/
-		    #/usr/include/eigen3/
-		    #/usr/include/boost/
-		    #/usr/include/flann/
-		    #/usr/include/vtk-5.4/)
+find_package(catkin REQUIRED COMPONENTS
+  actionlib
+  actionlib_msgs
+  cmake_modules
+  cob_object_detection_msgs
+  cob_perception_msgs
+  cv_bridge
+  image_transport
+  message_filters
+  nodelet
+  pcl_ros
+  roscpp
+  sensor_msgs
+  tf
+)
 
 find_package(Eigen REQUIRED)
-include_directories(${EIGEN_INCLUDE_DIRS})
-add_definitions(${EIGEN_DEFINITIONS})
-
+find_package(OpenCV REQUIRED)
+#find_package(PCL REQUIRED)
 find_package(VTK REQUIRED)
-include_directories(${VTK_INCLUDE_DIRS})
 
-# external pcl
-#find_package(PCL 1.6 REQUIRED)
-include_directories(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS})
-add_definitions(${PCL_DEFINITIONS})
+catkin_package()
 
-# Check for sse support
-rosbuild_check_for_sse()
-#set(SSE_FLAGS "-msse2 -mfpmath=sse")
 
-rosbuild_add_boost_directories()
+###########
+## Build ##
+###########
+include_directories(
+  common/include
+  ros/include
+  ${catkin_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+#  ${PCL_INCLUDE_DIRS}
+  ${Eigen_INCLUDE_DIRS}
+  ${VTK_INCLUDE_DIRS}
+)
 
-rosbuild_add_executable(object_categorization
-				common/src/AbstractBlobDetector.cpp
-				common/src/BlobFeature.cpp
-				common/src/BlobList.cpp
-				common/src/DetectorCore.cpp
-				common/src/ICP.cpp
-				common/src/JBKUtils.cpp
-				common/src/Math3d.cpp
-				common/src/ObjectClassifier.cpp
-				#common/src/ObjectClassifierMain.cpp
-				ros/src/object_categorization.cpp
-				common/src/OpenCVUtils.cpp
-				common/src/SharedImageJBK.cpp
-				common/src/SharedImageSequence.cpp
-				common/src/ThreeDUtils.cpp
-				common/src/timer.cpp)
-				#common/src/pcl/gfpfh.cpp)
-				
-rosbuild_add_executable(object_segmentation ros/src/segmentation_node.cpp)
+set(project_CPP_FILES
+  common/src/AbstractBlobDetector.cpp
+  common/src/BlobFeature.cpp
+  common/src/BlobList.cpp
+  common/src/DetectorCore.cpp
+  common/src/ICP.cpp
+  common/src/JBKUtils.cpp
+  common/src/Math3d.cpp
+  common/src/ObjectClassifier.cpp
+  #common/src/ObjectClassifierMain.cpp
+  ros/src/object_categorization.cpp
+  common/src/OpenCVUtils.cpp
+  common/src/SharedImageJBK.cpp
+  common/src/SharedImageSequence.cpp
+  common/src/ThreeDUtils.cpp
+  common/src/timer.cpp
+  common/src/pcl/rsd.cpp
+  #common/src/pcl/gfpfh.cpp)
+)
 
-rosbuild_add_compile_flags(object_categorization -D__LINUX__)
-rosbuild_add_compile_flags(object_segmentation -D__LINUX__)
+add_executable(object_categorization
+  ${project_CPP_FILES}
+)
+add_dependencies(object_categorization ${catkin_EXPORTED_TARGETS})
+target_link_libraries(object_categorization
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+#  ${PCL_LIBRARIES}
+  ${Eigen_LIBRARIES}
+  ${VTK_LIBRARIES}
+)
+set_target_properties(object_categorization PROPERTIES COMPILE_FLAGS "-D__LINUX__")
 
-rosbuild_link_boost(object_categorization filesystem system signals)
-rosbuild_link_boost(object_segmentation filesystem system signals)
 
-target_link_libraries(object_categorization ${PCL_LIBRARIES})  #${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES} ${PCL_FEATURES_LIBRARIES})
-target_link_libraries(object_segmentation ${PCL_LIBRARIES})    #${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES} ${PCL_FEATURES_LIBRARIES})
-#target_link_libraries(object_categorization pcl_features pcl_common pcl_kdtree pcl_search pcl_filters pcl_io)
-#target_link_libraries(object_segmentation pcl_features pcl_common pcl_kdtree pcl_search pcl_filters pcl_io)
+add_executable(object_segmentation 
+  ros/src/segmentation_node.cpp
+)
+add_dependencies(object_segmentation ${catkin_EXPORTED_TARGETS})
+target_link_libraries(object_segmentation
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+#  ${PCL_LIBRARIES}
+  ${Eigen_LIBRARIES}
+)
+set_target_properties(object_segmentation PROPERTIES COMPILE_FLAGS "-D__LINUX__")
 
-#common commands for building c++ executables and libraries
-#rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
-#target_link_libraries(${PROJECT_NAME} another_library)
-#rosbuild_add_boost_directories()
-#rosbuild_link_boost(${PROJECT_NAME} thread)
-#rosbuild_add_executable(example examples/example.cpp)
-#target_link_libraries(example ${PROJECT_NAME})
 
-rosbuild_add_roslaunch_check(ros/launch)
+#############
+## Install ##
+#############
+install(TARGETS 
+    object_categorization 
+    object_segmentation
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY 
+    common/include/${PROJECT_NAME}/
+    common/include/pcl/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+)
+
+install(DIRECTORY ros/launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/ros
+)

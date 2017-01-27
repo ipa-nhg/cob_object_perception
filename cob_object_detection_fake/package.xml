@@ -1,0 +1,21 @@
+<package format="2">
+  <name>cob_object_detection_fake</name>
+  <version>0.1.0</version>
+  <description>
+
+    fake implementation for detecting objects, in order to test other system components
+
+  </description>
+
+  <author>Joshua Hampp</author>
+  <maintainer email="josh@ipa.fhg.de">Joshua Hampp</maintainer>
+
+  <license>LGPL</license>
+  <url>http://ros.org/wiki/cob_object_detection_fake</url>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>cob_object_detection_msgs</exec_depend>
+
+</package>

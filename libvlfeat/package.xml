@@ -1,0 +1,12 @@
+<package format="2">
+  <name>libvlfeat</name>
+  <version>0.1.0</version>
+  <description>Wrapper for the vlfeat library from http://www.vlfeat.org/download.html</description>
+
+  <maintainer email="rmb@ipa.fhg.de">Richard Bormann</maintainer>
+
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+</package>

@@ -18,6 +18,8 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <pcl/conversions.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 #ifdef PCL_VERSION_COMPARE //fuerte
 	#define pcl_search pcl::search::KdTree
@@ -60,15 +62,20 @@ protected:
 		{
 			ROS_INFO("Segmenting data...");
 
+			pcl::PCLPointCloud2 pcl_pc;
+			pcl_conversions::toPCL(*input_pointcloud_msg, pcl_pc);
+			
 			typedef pcl::PointXYZRGB PointType;
-			pcl::PointCloud<PointType> input_pointcloud, temp;
-			pcl::fromROSMsg(*input_pointcloud_msg, temp);
+			pcl::PointCloud<PointType> input_pointcloud;//, temp;
 
-			// only keep points inside a defined volume
-			for (unsigned int v=0; v<temp.height; v++)
-				for (unsigned int u=0; u<temp.width; u++)
-					if (fabs(temp.at(u,v).x)<0.2 && temp.at(u,v).z<1.2)
-						input_pointcloud.push_back(temp.at(u,v));
+			pcl::fromPCLPointCloud2(pcl_pc, input_pointcloud);
+//			pcl_conversions::toPCL(*input_pointcloud_msg, input_pointcloud);
+//			pcl::fromROSMsg(*input_pointcloud_msg, temp);
+//			// only keep points inside a defined volume
+//			for (unsigned int v=0; v<temp.height; v++)
+//				for (unsigned int u=0; u<temp.width; u++)
+//					if (fabs(temp.at(u,v).x)<0.2 && temp.at(u,v).z<1.2)
+//						input_pointcloud.push_back(temp.at(u,v));
 
 			// Create the filtering object: downsample the dataset using a leaf size of 1cm
 			pcl::VoxelGrid<PointType> vg;
@@ -92,7 +99,7 @@ protected:
 			seg.setModelType (pcl::SACMODEL_PLANE);
 			seg.setMethodType (pcl::SAC_RANSAC);
 			seg.setMaxIterations (100);
-			seg.setDistanceThreshold (0.02);
+			seg.setDistanceThreshold (0.015);
 
 			int planeRemovals = 0;
 			int nr_points = (int) cloud_filtered->points.size();
@@ -156,7 +163,7 @@ protected:
 
 			std::vector<pcl::PointIndices> cluster_indices;
 			pcl::EuclideanClusterExtraction<PointType> ec;
-			ec.setClusterTolerance (0.5); // 2cm
+			ec.setClusterTolerance (0.1); // 2cm
 			ec.setMinClusterSize (50);
 			ec.setMaxClusterSize (25000);
 			ec.setSearchMethod (tree);
@@ -180,11 +187,12 @@ protected:
 
 				std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points." << std::endl;
 
-				if ((fabs(avgPoint.x) < cloud_cluster->points.size()*/*0.15*/0.5) && (fabs(avgPoint.y) < /*0.30*/0.5*cloud_cluster->points.size()) && (fabs(avgPoint.z) < 1.0*cloud_cluster->points.size()))
+//				if ((fabs(avgPoint.x) < cloud_cluster->points.size()*/*0.15*/0.5) && (fabs(avgPoint.y) < /*0.30*/0.5*cloud_cluster->points.size()) && (fabs(avgPoint.z) < 1.0*cloud_cluster->points.size()))
+				if ((fabs(avgPoint.x) < cloud_cluster->points.size()*/*0.15*/0.3) && (fabs(avgPoint.y) < /*0.30*/0.4*cloud_cluster->points.size()) && (fabs(avgPoint.z) < 1.2*cloud_cluster->points.size()))
 				{
 					std::cout << "found a cluster in the center" << std::endl;
-					cloud_cluster->header.stamp = input_pointcloud_msg->header.stamp;
-					cloud_cluster->header.frame_id = input_pointcloud_msg->header.frame_id;
+					
+					cloud_cluster->header = pcl_conversions::toPCL(input_pointcloud_msg->header);
 					sensor_msgs::PointCloud2 output_pointcloud_msg;
 					pcl::toROSMsg(*cloud_cluster, output_pointcloud_msg);
 //					std::string filename = ros::package::getPath("cob_object_categorization") + "/test.pcd";

@@ -1,16 +1,18 @@
-//#include "../../../../cob_object_perception_intern/windows/src/PreCompiledHeaders/StdAfx.h"
+#include <cob_vision_utils/StdAfx.h>
 #ifdef __LINUX__
 	#include "cob_fiducials/pi/FiducialModelPi.h"
 	#include "cob_fiducials/aruco/FiducialModelAruco.h"
 	#include "cob_fiducials/FiducialTestingEnvironment.h"
+
+	#include <opencv/highgui.h>
+	#include <boost/progress.hpp>
 #else
 	#include "cob_object_perception/cob_fiducials/common/include/cob_fiducials/pi/FiducialModelPi.h"
 	#include "cob_object_perception/cob_fiducials/common/include/cob_fiducials/aruco/FiducialModelAruco.h"
 	#include "cob_object_perception/cob_fiducials/common/include/cob_fiducials/FiducialTestingEnvironment.h"
 #endif
 
-#include <opencv/highgui.h>
-#include <boost/progress.hpp>
+
 
 using namespace ipa_Fiducials;
 
@@ -28,7 +30,7 @@ FiducialTestingEnvironment::~FiducialTestingEnvironment()
 unsigned long FiducialTestingEnvironment::FiducialTestAruco()
 {
 	// ----------------------------------- Init detector -----------------------------------------
-	if (m_aruco_tag->Init(m_camera_matrix, "ConfigurationFiles/objectDetectorIni.xml") & ipa_Utils::RET_FAILED)
+	if (m_aruco_tag->Init(m_camera_matrix, "ConfigurationFiles/objectDetectorIni.xml", false) & ipa_Utils::RET_FAILED)
 		return ipa_Utils::RET_FAILED;
 
 	// ----------------------------------- Load images -----------------------------------------
@@ -86,7 +88,7 @@ unsigned long FiducialTestingEnvironment::FiducialTestAruco()
 unsigned long FiducialTestingEnvironment::FiducialTestPI()
 {
 	// ----------------------------------- Init detector -----------------------------------------
-	if (m_pi_tag->Init(m_camera_matrix, "ConfigurationFiles/objectDetectorIni.xml") & ipa_Utils::RET_FAILED)
+	if (m_pi_tag->Init(m_camera_matrix, "ConfigurationFiles/objectDetectorIni.xml", false) & ipa_Utils::RET_FAILED)
 		return ipa_Utils::RET_FAILED;
 
 	// ----------------------------------- Load images -----------------------------------------

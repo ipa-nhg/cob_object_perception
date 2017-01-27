@@ -21,6 +21,7 @@
 #include <cob_object_detection_msgs/DetectionArray.h>
 #include <cob_object_detection_msgs/StartObjectRecording.h>
 #include <cob_object_detection_msgs/StopObjectRecording.h>
+#include <std_srvs/Empty.h>
 #include <cob_object_detection_msgs/SaveRecordedObject.h>
 
 #include <message_filters/subscriber.h>
@@ -39,7 +40,10 @@
 #include <boost/bind.hpp>
 
 // SFML
-#include <SFML/Audio.hpp>
+//#define WITH_AUDIO_FEEDBACK
+#ifdef WITH_AUDIO_FEEDBACK
+	#include <SFML/Audio.hpp>
+#endif
 
 // PCL
 #include <pcl/ModelCoefficients.h>
@@ -99,6 +103,9 @@ protected:
 	/// Implementation of the service for stopping recording.
 	bool stopRecording(cob_object_detection_msgs::StopObjectRecording::Request &req, cob_object_detection_msgs::StopObjectRecording::Response &res);
 
+	/// Implementation of the service for removing the recorded image from the current perspective.
+	bool resetCurrentView(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+
 	/// Implementation of the service for storing the recorded object on disc.
 	bool saveRecordedObject(cob_object_detection_msgs::SaveRecordedObject::Request &req, cob_object_detection_msgs::SaveRecordedObject::Response &res);
 
@@ -124,11 +131,14 @@ protected:
 	/// Segmentation function for removing all parts from the color image and the point cloud that do not belong to the object.
 	/// @param color_image A color image.
 	/// @param pointcloud A point cloud.
-	/// @param pose_OfromC The transform from the object coordinate system to the camera, i.e. that transform which converts from camera coordinates to object coordinates.
+	/// @param pose_OfromC The transform from the object coordinate system to the camera, i.e. that transform which converts from camera coordinates to object coordinates. This transform might be changed with regard to the z-axis using the results from ground plane fitting.
 	/// @param xyzr_learning_coordinates The bounding box of the recording area, all data inside this box is considered part of the object. Attention: val[0]=half length, val[1]=half width, val[2]=full height, val[3]=offset to minimal height 0 (to exclude outliers of the ground plane)
 	/// @param uv_learning_boundaries Returned 2D bounding box of the recorded area in the color image, val[0]=minU, val[1]=maxU, val[2]=minV, val[3]=maxV
 	/// @return 0 if everything went well.
-	unsigned long ImageAndRangeSegmentation(cv::Mat& color_image, pcl::PointCloud<pcl::PointXYZRGB>& pointcloud, const tf::Transform& pose_OfromC, cv::Scalar& xyzr_learning_coordinates, cv::Scalar& uv_learning_boundaries);
+	unsigned long ImageAndRangeSegmentation(cv::Mat& color_image, pcl::PointCloud<pcl::PointXYZRGB>& pointcloud, tf::Transform& pose_OfromC, cv::Scalar& xyzr_learning_coordinates, cv::Scalar& uv_learning_boundaries);
+
+	/// fits a ground plane at the provided area of the marker board
+	bool FitGroundPlane(const pcl::PointCloud<pcl::PointXYZRGB>& pointcloud, const tf::Transform& pose_CfromO, double start_dx, double end_dx, double start_dy, double end_dy, pcl::ModelCoefficients& coefficients/*, double& mean_z*/);
 
 	/// Projects a 3D point into the coordinates of the color camera image.
 	unsigned long ProjectXYZ(double x, double y, double z, int& u, int& v);
@@ -149,10 +159,13 @@ protected:
 	message_filters::Connection registered_callback_;
 	boost::shared_ptr<image_transport::ImageTransport> it_pub_;
 	image_transport::Publisher display_image_pub_; ///< publishes 2D image data to display currently visible image with some hints for useful camera movements
+	image_transport::Publisher recorded_color_image_pub_; ///< publishes 2D image data of the recorded color image data at the current position
+	image_transport::Publisher recorded_depth_image_pub_; ///< publishes 2D image data of the recorded depth image data at the current position
 
 	ros::ServiceServer service_server_start_recording_; ///< Service server which accepts requests for starting recording
 	ros::ServiceServer service_server_stop_recording_; ///< Service server which accepts requests for stopping recording
-	ros::ServiceServer service_server_save_recorded_object_; ///< Service server which accepts requests for saving recorded data to disk
+	ros::ServiceServer service_server_reset_current_view_;	///< Service server that allows to reset recorded data of the current perspective
+	ros::ServiceServer service_server_save_recorded_object_;	///< Service server which accepts requests for saving recorded data to disk
 
 	dynamic_reconfigure::Server<cob_object_recording::ObjectRecordingConfig> dynamic_reconfigure_server_;
 
@@ -162,6 +175,7 @@ protected:
 
 	ros::NodeHandle node_handle_;			///< ROS node handle
 
+#ifdef WITH_AUDIO_FEEDBACK
 	// sound feedback
 	std::vector<sf::Int16> sound_feedback_samples_proximity_;
 	sf::SoundBuffer sound_feedback_buffer_proximity_;
@@ -169,6 +183,7 @@ protected:
 	std::vector<sf::Int16> sound_feedback_samples_hit_;
 	sf::SoundBuffer sound_feedback_buffer_hit_;
 	sf::Sound sound_feedback_sound_hit_;
+#endif
 
 //	unsigned int pointcloud_width_;			///< width of the received point cloud
 //	unsigned int pointcloud_height_;			///< height of the received point cloud
@@ -184,6 +199,7 @@ protected:
 
 	std::string current_object_label_;		///< label of the recorded object
 	std::vector<RecordingData> recording_data_;		///< container for the desired perspectives and the recorded data
+	int current_closest_pose_;		///< the index of the currently closest pose
 
 	std::string data_storage_path_;		///< folder for data storage
 	cv::Scalar xyzr_recording_bounding_box_;	///< (maximum) bounding box for the recorded object, i.e. the bounding box may be specified too big. (val[0]=half length, val[1]=half width, val[2]=full height, val[3]=offset to minimal height 0 (to exclude outliers of the ground plane))
